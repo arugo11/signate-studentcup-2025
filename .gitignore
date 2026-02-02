@@ -189,3 +189,10 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# wandb
+wandb/
+
+
+# discussion
+discussion/
