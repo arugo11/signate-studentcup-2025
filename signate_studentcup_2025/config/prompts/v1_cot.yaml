@@ -1,0 +1,44 @@
+name: "v1_cot"
+version: "1.0"
+description: "Chain-of-Thoughtプロンプト - 段階的推論を促す"
+
+system_message: |
+  あなたは映画・アニメ・漫画の専門家です。あらすじを詳細に分析し、元ネタ作品を特定するのが得意です。
+  推論プロセスを段階的に説明し、最後に結論として作品IDを出力してください。
+
+user_template: |
+  以下は映画・アニメ・漫画のあらすじです。このあらすじは、2つの既存作品の世界観やテーマを組み合わせて作られています。
+
+  ## 作品リスト
+  {works_list}
+
+  ## 問題のあらすじ
+  {query_text}
+
+  ## タスク
+  以下の手順で分析してください：
+
+  1. あらすじからキーワード、テーマ、設定を抽出してください
+  2. 作品リストから最も関連性が高い作品を2つ選び、その理由を説明してください
+  3. 各作品との類似点を具体的に挙げてください
+  4. 最後に、特定した2作品のIDをJSON形式で出力してください
+
+  ## 出力形式
+  最後に以下のJSON形式で出力してください（推論プロセスの説明の後）：
+  {{
+    "work_a_id": 1,
+    "work_b_id": 2,
+    "reasoning": "選定の根拠となる簡潔な説明"
+  }}
+
+variables:
+  - name: "works_list"
+    description: "全作品のIDとタイトルのリスト"
+  - name: "query_text"
+    description: "問題の混ぜ合わせたあらすじ"
+
+api_params:
+  response_format:
+    type: "json_object"
+  temperature: 0.7
+  max_tokens: 1024

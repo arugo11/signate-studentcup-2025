@@ -13,6 +13,7 @@ from signate_studentcup_2025.config import (
     OpenRouterConfig,
     OutputConfig,
 )
+from signate_studentcup_2025.weave import weave_op_decorator, weave_op_decorator_configured
 
 app = typer.Typer()
 
@@ -36,6 +37,9 @@ class EmbeddingBackend(ABC):
 class OpenRouterEmbeddingBackend(EmbeddingBackend):
     """OpenRouter APIによる埋め込み生成"""
 
+    # バックエンド名
+    backend_name = "openrouter"
+
     def __init__(self, api_key: str, model: str = None, dim: int = None):
         from openai import OpenAI
 
@@ -46,6 +50,7 @@ class OpenRouterEmbeddingBackend(EmbeddingBackend):
         self.model = model or OpenRouterConfig.EMBEDDING_MODEL
         self._dim = dim or OpenRouterConfig.EMBEDDING_DIM
 
+    @weave_op_decorator_configured("TRACE_EMBEDDINGS")
     def encode(self, texts: list[str]) -> np.ndarray:
         """バッチ処理でAPI呼び出し"""
         # OpenAI Embeddings APIは最大2048テキストまでバッチ可能
@@ -119,10 +124,12 @@ class EmbeddingModel:
 
 # === FAISSインデックス構築 ===
 
+@weave_op_decorator
 def build_faiss_index(
     corpus_texts: list[str],
     model: EmbeddingModel,
     save_path: Path | None = None,
+    wandb_run=None,
 ) -> tuple[faiss.Index, np.ndarray]:
     """
     FAISSインデックスを構築
@@ -131,6 +138,7 @@ def build_faiss_index(
         corpus_texts: コーパステキストのリスト
         model: 埋め込みモデル
         save_path: インデックス保存先（オプション）
+        wandb_run: Wandb Runオブジェクト（オプション）
 
     Returns:
         (FAISSインデックス, 埋め込み配列)
@@ -157,9 +165,63 @@ def build_faiss_index(
             pickle.dump({"index": index, "embeddings": embeddings}, f)
         logger.info(f"インデックスを保存: {save_path}")
 
+    # Wandb Artifactとしてログ
+    if wandb_run and save_path:
+        from signate_studentcup_2025.config import ArtifactsConfig
+        import wandb as wandb_module
+        from datetime import datetime
+        import json
+
+        if ArtifactsConfig.LOG_FAISS_INDEX:
+            # バックエンド名を取得（backendはEmbeddingBackendオブジェクト）
+            if hasattr(model, 'backend') and hasattr(model.backend, 'backend_name'):
+                backend_name = model.backend.backend_name
+            else:
+                backend_name = "unknown"
+
+            # モデル名を取得
+            if hasattr(model, 'backend') and hasattr(model.backend, 'model'):
+                model_name = model.backend.model
+            else:
+                model_name = backend_name
+
+            artifact = wandb_module.Artifact(
+                name=f"faiss-index-{backend_name}",
+                type="faiss_index",
+                metadata={
+                    "backend": backend_name,
+                    "embedding_model": model_name,
+                    "dimension": model.get_dim(),
+                    "num_vectors": len(corpus_texts),
+                    "index_type": "IndexFlatIP",
+                    "created_at": datetime.now().isoformat(),
+                }
+            )
+
+            # インデックスファイルを追加
+            artifact.add_file(str(save_path))
+
+            # メタデータJSONを追加
+            metadata_path = save_path.parent / f"{save_path.stem}_metadata.json"
+            with open(metadata_path, 'w') as f:
+                json.dump({
+                    "corpus_size": len(corpus_texts),
+                    "embedding_dim": model.get_dim(),
+                    "backend": backend_name,
+                    "model": model_name,
+                }, f)
+            artifact.add_file(str(metadata_path))
+
+            wandb_run.log_artifact(artifact)
+            logger.info(f"Logged FAISS index artifact: {artifact.name}")
+
+            # 一時メタデータファイルを削除
+            metadata_path.unlink(missing_ok=True)
+
     return index, embeddings
 
 
+@weave_op_decorator_configured("TRACE_RETRIEVAL")
 def retrieve_top_k(
     query_text: str,
     index: faiss.Index,

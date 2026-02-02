@@ -1,0 +1,32 @@
+# Retrieval-focused hyperparameter sweep
+
+program: signate_studentcup_2025/modeling/sweep_wrapper.py
+method: bayes
+metric:
+  name: accuracy
+  goal: maximize
+
+parameters:
+  # Fixed approach for retrieval sweep
+  approach:
+    value: "retrieval"
+
+  # Top-K sweep
+  top_k:
+    values: [3, 5, 10, 15, 20, 30, 50]
+
+  # Model selection (embedding model varies in features.py)
+  model:
+    value: "openai/gpt-4o-mini"  # Not used in retrieval
+
+  # FAISS index type
+  faiss_index_type:
+    values: ["IndexFlatIP", "IndexFlatL2"]
+
+command:
+  - "${program}"
+  - "evaluate-sweep-trial"
+  - "--approach"
+  - "${approach}"
+  - "--top_k"
+  - "${top_k}"

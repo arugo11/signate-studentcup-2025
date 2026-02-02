@@ -15,9 +15,14 @@ from signate_studentcup_2025.config import (
     RetrievalConfig,
     WandbConfig,
     DataConfig,
+    ArtifactsConfig,
+    load_prompt,
+    format_prompt,
+    list_prompts,
 )
 from signate_studentcup_2025.dataset import load_base_stories, load_fiction_data, prepare_corpus
 from signate_studentcup_2025.features import EmbeddingModel, build_faiss_index, retrieve_top_k
+from signate_studentcup_2025.weave import weave_op_decorator, weave_op_decorator_configured
 
 app = typer.Typer()
 
@@ -43,8 +48,14 @@ class OpenRouterRetrievalPredictor(Predictor):
         self.base_df = None
         self.interim_dir = OutputConfig.INTERIM_DIR
 
-    def fit(self, base_df: pl.DataFrame):
-        """ベース作品からインデックス構築"""
+    @weave_op_decorator
+    def fit(self, base_df: pl.DataFrame, wandb_run=None):
+        """ベース作品からインデックス構築
+
+        Args:
+            base_df: ベース作品DataFrame
+            wandb_run: Wandb Runオブジェクト（オプション）
+        """
         self.base_df = base_df
         corpus = prepare_corpus(base_df)
 
@@ -54,8 +65,10 @@ class OpenRouterRetrievalPredictor(Predictor):
             corpus,
             self.model,
             save_path=index_path,
+            wandb_run=wandb_run,
         )
 
+    @weave_op_decorator_configured("TRACE_PREDICTIONS")
     def predict(self, query_text: str) -> tuple[int, int]:
         """上位2件を予測"""
         # Top-K検索
@@ -69,7 +82,11 @@ class OpenRouterRetrievalPredictor(Predictor):
 class OpenRouterDirectPredictor(Predictor):
     """OpenRouter LLMによる直接予測"""
 
-    def __init__(self, model: str = "openai/gpt-4o-mini"):
+    def __init__(
+        self,
+        model: str = "openai/gpt-4o-mini",
+        prompt_name: str = "base",
+    ):
         from openai import OpenAI
 
         self.client = OpenAI(
@@ -77,12 +94,17 @@ class OpenRouterDirectPredictor(Predictor):
             api_key=OpenRouterConfig.API_KEY,
         )
         self.model = model
+        self.prompt_name = prompt_name
+        self.prompt_config = load_prompt(prompt_name)
         self.base_df = None
+
+        logger.info(f"Initialized OpenRouterDirectPredictor with prompt: {prompt_name}")
 
     def fit(self, base_df: pl.DataFrame):
         """ベース作品情報を保持"""
         self.base_df = base_df
 
+    @weave_op_decorator_configured("TRACE_PREDICTIONS")
     def predict(self, query_text: str) -> tuple[int, int]:
         """LLMに直接2作品を予測させる"""
         # 作品リストを作成（簡略化）
@@ -166,6 +188,8 @@ def predict(
         top_k: Top-K検索のK値
         output_path: 出力ファイルパス（未指定はYAMLのデフォルト）
     """
+    from datetime import datetime
+
     # デフォルト値をYAMLから取得
     if model is None:
         model = OpenRouterConfig.DEFAULT_CHAT_MODEL
@@ -174,9 +198,10 @@ def predict(
     if output_path is None:
         output_path = OutputConfig.SUBMISSION_DIR / "submission.csv"
 
-    # Wandb初期化（最小限実装）
+    # Wandb初期化
+    run = None
     if WandbConfig.ENABLED:
-        wandb.init(
+        run = wandb.init(
             entity=WandbConfig.ENTITY,
             project=WandbConfig.PROJECT,
             job_type="predict",
@@ -189,9 +214,38 @@ def predict(
             mode=WandbConfig.MODE,
         )
 
+        # Weave初期化
+        from signate_studentcup_2025.weave import init_weave
+
+        init_weave(
+            entity=WandbConfig.ENTITY,
+            project=WandbConfig.PROJECT,
+            enabled=True,
+        )
+
     # データ読み込み（パスはYAMLから取得）
     base_df = load_base_stories(DataConfig.BASE_STORIES_PATH)
     test_df = load_fiction_data(DataConfig.FICTION_STORIES_TEST_PATH)
+
+    # データセットをArtifactとしてログ
+    if run and ArtifactsConfig.LOG_DATASETS:
+        from signate_studentcup_2025.config import log_dataset_as_artifact
+
+        log_dataset_as_artifact(
+            base_df,
+            artifact_name="base-stories",
+            artifact_type="dataset",
+            wandb_run=run,
+            metadata={"source": "raw/base_stories.tsv"},
+        )
+
+        log_dataset_as_artifact(
+            test_df,
+            artifact_name="fiction-test",
+            artifact_type="dataset",
+            wandb_run=run,
+            metadata={"source": "raw/fiction_stories_test.tsv"},
+        )
 
     # 予測器初期化
     if approach == "retrieval":
@@ -203,7 +257,10 @@ def predict(
 
     # 学習（インデックス構築）
     logger.info("インデックス構築中...")
-    predictor.fit(base_df)
+    if approach == "retrieval" and run:
+        predictor.fit(base_df, wandb_run=run)
+    else:
+        predictor.fit(base_df)
 
     # 推論実行
     logger.info(f"推論実行中: {len(test_df)}件")
@@ -217,22 +274,33 @@ def predict(
     result_df.write_csv(output_path, include_header=False)
     logger.success(f"提出ファイルを保存しました: {output_path}")
 
-    # Wandbにログ（最小限実装）
-    if WandbConfig.ENABLED:
-        wandb.log({"num_predictions": len(results)})
-        # TODO: 将来的に追加するWandb機能
-        """
-        TODO: Artifactsで提出ファイルを保存
-        artifact = wandb.Artifact(name=f"submission_{approach}", type="submission")
-        artifact.add_file(output_path)
-        wandb.log_artifact(artifact)
+    # 提出ファイルをArtifactとしてログ
+    if run and ArtifactsConfig.LOG_SUBMISSIONS:
+        submission_artifact = wandb.Artifact(
+            name=f"submission-{approach}",
+            type="submission",
+            metadata={
+                "approach": approach,
+                "model": model,
+                "top_k": top_k,
+                "num_predictions": len(results),
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+        submission_artifact.add_file(str(output_path))
+        run.log_artifact(submission_artifact)
+        submission_artifact.wait()
+        run.log_artifact(submission_artifact, aliases=["latest"])
+        logger.info(f"Logged submission artifact: {submission_artifact.name}")
 
-        TODO: 推論結果の要約をログ
-        wandb.log({
-            "prediction_distribution": wandb.Histogram(pred_ids),
-            "unique_predictions": len(set(results)),
+    # メトリクスログ
+    if run:
+        unique_predictions = len(set((r["a"], r["b"]) for r in results))
+        run.log({
+            "num_predictions": len(results),
+            "unique_predictions": unique_predictions,
+            "unique_ratio": unique_predictions / len(results),
         })
-        """
         wandb.finish()
 
 
