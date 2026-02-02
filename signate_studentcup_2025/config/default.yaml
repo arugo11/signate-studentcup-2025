@@ -1,0 +1,34 @@
+# Wandb設定
+wandb:
+  entity: argo11
+  project: studentcup-2025
+  mode: online  # online | offline | disabled
+
+# 検索設定
+retrieval:
+  top_k: 10
+  faiss_index_type: IndexFlatIP
+
+# 評価設定
+evaluation:
+  metrics:
+    - accuracy
+    - hit_rate
+    - mrr
+    - ndcg
+  k_values:
+    - 1
+    - 5
+    - 10
+    - 20
+
+# データ設定
+data:
+  base_stories_path: data/raw/base_stories.tsv
+  fiction_stories_practice_path: data/raw/fiction_stories_practice.tsv
+  fiction_stories_test_path: data/raw/fiction_stories_test.tsv
+
+# 出力設定
+output:
+  submission_dir: data/processed
+  interim_dir: data/interim

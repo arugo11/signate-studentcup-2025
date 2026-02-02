@@ -1,0 +1,22 @@
+# OpenRouter埋め込みモデル
+embedding:
+  model: openai/text-embedding-3-small
+  dim: 1536
+  max_length: 8191
+
+# OpenRouterチャットモデル
+chat:
+  models:
+    gpt-4o-mini:
+      id: openai/gpt-4o-mini
+      description: 高速・低コスト
+    claude-3.5-sonnet:
+      id: anthropic/claude-3.5-sonnet
+      description: 高精度
+    claude-3.5-haiku:
+      id: anthropic/claude-3.5-haiku
+      description: バランス
+    gemini-flash:
+      id: google/gemini-flash-1.5
+      description: 安価
+  default_model: gpt-4o-mini

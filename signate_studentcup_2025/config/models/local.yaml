@@ -1,0 +1,16 @@
+# ローカル埋め込みモデル（後で実装）
+# TODO: sentence-transformersを追加したときに使用
+
+sentence_transformer:
+  models:
+    e5-base:
+      model_name: intfloat/multilingual-e5-base
+      dim: 768
+      max_length: 512
+      prefix_query: "query:"
+      prefix_passage: "passage:"
+    distilbert-ja:
+      model_name: sonoisa/sentence-distilbert-base-ja
+      dim: 768
+      max_length: 512
+  default_model: e5-base
