@@ -18,9 +18,11 @@ classifiers = [
 dependencies = [
     "faiss-cpu>=1.13.2",
     "loguru",
+    "matplotlib>=3.8.0",
     "mkdocs",
     "numpy>=2.2.6",
     "openai>=2.16.0",
+    "pandas>=2.1.0",
     "pip",
     "polars>=1.37.1",
     "pytest>=9.0.2",
@@ -28,9 +30,12 @@ dependencies = [
     "python-dotenv",
     "pyyaml>=6.0.3",
     "ruff",
+    "scikit-learn>=1.4.0",
+    "scipy>=1.12.0",
     "tqdm",
     "typer",
-    "wandb>=0.24.1",
+    "umap-learn>=0.5.5",
+    "wandb>=0.18.0",
 ]
 requires-python = "~=3.10.0"
 

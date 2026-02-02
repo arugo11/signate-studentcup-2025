@@ -1,0 +1,45 @@
+# Full hyperparameter sweep configuration
+# Covers both retrieval and direct approaches
+
+program: signate_studentcup_2025/modeling/sweep_wrapper.py
+method: bayes  # Bayesian optimization for efficient search
+metric:
+  name: accuracy
+  goal: maximize
+
+parameters:
+  # Approach selection
+  approach:
+    values: ["retrieval", "direct"]
+
+  # Top-K for retrieval (only used when approach=retrieval)
+  top_k:
+    values: [3, 5, 10, 15, 20, 30]
+
+  # Model selection
+  model:
+    values:
+      - "openai/gpt-4o-mini"
+      - "anthropic/claude-3.5-haiku"
+      - "google/gemini-flash-1.5"
+
+  # FAISS index type (only for retrieval)
+  faiss_index_type:
+    values: ["IndexFlatIP", "IndexFlatL2"]
+
+# Early stopping configuration
+early_terminate:
+  type: hyperband
+  min_iter: 3
+  eta: 3
+
+# Run configuration
+command:
+  - "${program}"
+  - "evaluate-sweep-trial"
+  - "--approach"
+  - "${approach}"
+  - "--top_k"
+  - "${top_k}"
+  - "--model"
+  - "${model}"

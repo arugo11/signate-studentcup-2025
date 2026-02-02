@@ -1,8 +1,28 @@
 # Wandb設定
 wandb:
-  entity: argo11
+  entity: argo-lab  # チーム名
   project: studentcup-2025
   mode: online  # online | offline | disabled
+
+# Weaveトレース設定
+weave:
+  enabled: true
+  trace_embeddings: true
+  trace_retrieval: true
+  trace_predictions: true
+
+# ダッシュボード設定
+dashboard:
+  error_analysis: true
+  embedding_viz: false  # Computationally expensive, disabled by default
+  distribution_plots: true
+
+# Artifacts設定
+artifacts:
+  log_faiss_index: true
+  log_datasets: true
+  log_submissions: true
+  log_evaluations: true
 
 # 検索設定
 retrieval:
@@ -32,3 +52,8 @@ data:
 output:
   submission_dir: data/processed
   interim_dir: data/interim
+
+# Sweeps設定
+sweeps:
+  max_trials: 100
+  optimization_metric: accuracy
