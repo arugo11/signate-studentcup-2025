@@ -5,12 +5,12 @@ import os
 from typing import Any
 import yaml
 
-# 環境変数読み込み
-load_dotenv()
-
 # パス
 PROJ_ROOT = Path(__file__).resolve().parents[1]
 logger.info(f"PROJ_ROOT path is: {PROJ_ROOT}")
+
+# 環境変数読み込み（.envをプロジェクトルートから読み込む）
+load_dotenv(PROJ_ROOT / ".env")
 
 DATA_DIR = PROJ_ROOT / "data"
 RAW_DATA_DIR = DATA_DIR / "raw"
@@ -122,33 +122,112 @@ class OutputConfig:
     INTERIM_DIR = Path(_DEFAULT_CONFIG.get("output", {}).get("interim_dir", "data/interim"))
 
 
-# TODO: 将来的に追加するWandb機能
+class ArtifactsConfig:
+    """Artifacts管理設定（YAMLから読み込み）"""
+    LOG_FAISS_INDEX = _DEFAULT_CONFIG.get("artifacts", {}).get("log_faiss_index", True)
+    LOG_DATASETS = _DEFAULT_CONFIG.get("artifacts", {}).get("log_datasets", True)
+    LOG_SUBMISSIONS = _DEFAULT_CONFIG.get("artifacts", {}).get("log_submissions", True)
+    LOG_EVALUATIONS = _DEFAULT_CONFIG.get("artifacts", {}).get("log_evaluations", True)
+
+
+class WeaveConfig:
+    """Weaveトレース設定（YAMLから読み込み）"""
+    ENABLED = _DEFAULT_CONFIG.get("weave", {}).get("enabled", True)
+    TRACE_EMBEDDINGS = _DEFAULT_CONFIG.get("weave", {}).get("trace_embeddings", True)
+    TRACE_RETRIEVAL = _DEFAULT_CONFIG.get("weave", {}).get("trace_retrieval", True)
+    TRACE_PREDICTIONS = _DEFAULT_CONFIG.get("weave", {}).get("trace_predictions", True)
+
+
+class DashboardConfig:
+    """ダッシュボード設定（YAMLから読み込み）"""
+    ERROR_ANALYSIS = _DEFAULT_CONFIG.get("dashboard", {}).get("error_analysis", True)
+    EMBEDDING_VIZ = _DEFAULT_CONFIG.get("dashboard", {}).get("embedding_viz", False)
+    DISTRIBUTION_PLOTS = _DEFAULT_CONFIG.get("dashboard", {}).get("distribution_plots", True)
+
+
+class SweepsConfig:
+    """Sweeps設定（YAMLから読み込み）"""
+    MAX_TRIALS = _DEFAULT_CONFIG.get("sweeps", {}).get("max_trials", 100)
+    OPTIMIZATION_METRIC = _DEFAULT_CONFIG.get("sweeps", {}).get("optimization_metric", "accuracy")
+
+
+# === Artifactsヘルパー関数 ===
+
+def log_dataset_as_artifact(
+    df,
+    artifact_name: str,
+    artifact_type: str,
+    wandb_run,
+    metadata: dict | None = None,
+):
+    """
+    DataFrameをWandb Artifactとしてログ
+
+    Args:
+        df: Polars DataFrame
+        artifact_name: Artifact名（例: "base-stories"）
+        artifact_type: Artifactタイプ（例: "dataset"）
+        wandb_run: Wandb Runオブジェクト
+        metadata: 追加メタデータ
+
+    Returns:
+        wandb.Artifact: ログされたArtifact
+    """
+    import tempfile
+    import polars as pl
+    import wandb as wandb_module
+
+    artifact = wandb_module.Artifact(
+        name=artifact_name,
+        type=artifact_type,
+        metadata={
+            "num_rows": len(df),
+            "columns": df.columns,
+            **(metadata or {}),
+        }
+    )
+
+    # 一時ファイルに保存してartifactに追加
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        df.write_csv(f.name)
+        artifact.add_file(f.name, name=f"{artifact_name}.csv")
+        temp_path = f.name
+
+    wandb_run.log_artifact(artifact)
+    logger.info(f"Logged dataset artifact: {artifact.name}")
+
+    # 一時ファイルを削除
+    Path(temp_path).unlink(missing_ok=True)
+
+    return artifact
+
+
 """
-TODO: Wandbの高度な機能を実装
+Wandb機能実装状況:
 
-現在の実装: 基本的なログ（metrics, config）のみ
+実装済み:
+✓ Artifacts管理
+  - FAISSインデックスの保存（build_faiss_indexで自動ログ）
+  - データセットの保存（log_dataset_as_artifact関数）
+  - 提出ファイルのバージョニング（predict.pyで実装）
+  - 評価結果の保存（evaluate.pyで実装）
 
-将来的に追加する機能:
-1. Artifacts管理
-   - FAISSインデックスの保存・共有
-   - 埋め込みモデルのキャッシュ
-   - 提出ファイルのバージョニング
-   実装方法: wandb.log_artifact(), wandb.use_artifact()
+✓ Sweeps（ハイパーパラメータ探索）
+  - sweep_wrapper.py: wandb.sweep() + wandb.agent()
+  - sweep_analysis.py: 結果分析と比較
+  - 設定ファイル: config/sweeps*.yaml
 
-2. Sweeps（ハイパーパラメータ探索）
-   - top_k, model_nameの最適化
-   - 複数アプローチの比較
-   実装方法: wandb.sweep() + wandb.agent()
+✓ Weave（トレース・デバッグ）
+  - init_weave(): Weave初期化
+  - weave_op_decorator: @weave.op()デコレータ
+  - weave_op_decorator_configured: 設定によるOn/Off制御
+  - WeaveConfigによる制御（TRACE_EMBEDDINGS, TRACE_RETRIEVAL, TRACE_PREDICTIONS）
 
-3. Weave（トレース・デバッグ）
-   - 検索・再ランキングのステップをトレース
-   - エラー解析を容易に
-   実装方法: @weave.op() デコレータ
-
-4. Modelの保存・ロード
-   - 学習済みモデルの登録
-   - 推論時のモデルバージョン管理
-   実装方法: wandb.Artifact()
+✓ ダッシュボード機能
+  - ErrorAnalyzer: 誤分類分析
+  - PredictionAnalyzer: 予測分布分析
+  - EmbeddingVisualizer: 埋め込み空間可視化
+  - DashboardConfigによるOn/Off制御（ERROR_ANALYSIS, DISTRIBUTION_PLOTS, EMBEDDING_VIZ）
 
 参考: https://docs.wandb.ai/guides
 """

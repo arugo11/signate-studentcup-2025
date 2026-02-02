@@ -1,0 +1,37 @@
+# Direct LLM-focused hyperparameter sweep
+
+program: signate_studentcup_2025/modeling/sweep_wrapper.py
+method: bayes
+metric:
+  name: accuracy
+  goal: maximize
+
+parameters:
+  # Fixed approach for direct LLM sweep
+  approach:
+    value: "direct"
+
+  # Top-K not used in direct approach
+  top_k:
+    value: 10
+
+  # Model sweep (different LLMs)
+  model:
+    values:
+      - "openai/gpt-4o-mini"
+      - "anthropic/claude-3.5-haiku"
+      - "anthropic/claude-3.5-sonnet"
+      - "google/gemini-flash-1.5"
+      - "google/gemini-pro-1.5"
+
+  # FAISS not used in direct
+  faiss_index_type:
+    value: "IndexFlatIP"
+
+command:
+  - "${program}"
+  - "evaluate-sweep-trial"
+  - "--approach"
+  - "${approach}"
+  - "--model"
+  - "${model}"

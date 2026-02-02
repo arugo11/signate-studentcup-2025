@@ -1,0 +1,47 @@
+name: "v4_ensemble"
+version: "1.0"
+description: "アンサンブル推奨プロンプト - 不確実性を考慮"
+
+system_message: |
+  あなたは映画・アニメ・漫画の専門家です。あらすじから元ネタ作品を特定するのが得意です。
+  不確実な場合、複数の候補を挙げ、最も可能性が高い組み合わせを選択してください。
+
+user_template: |
+  以下は映画・アニメ・漫画のあらすじです。このあらすじは、2つの既存作品の世界観やテーマを組み合わせて作られています。
+
+  ## 作品リスト
+  {works_list}
+
+  ## 問題のあらすじ
+  {query_text}
+
+  ## タスク
+  1. あらすじから最も関連性が高い作品を3〜5個選んでください
+  2. それぞれの作品とあらすじの類似度を評価してください（高/中/低）
+  3. 類似度が高い2作品の組み合わせの中で、最も可能性が高い組み合わせを選んでください
+
+  ## 出力形式
+  以下のJSON形式で出力してください：
+  {{
+    "work_a_id": 1,
+    "work_b_id": 2,
+    "candidates": [
+      {{"id": 1, "similarity": "高", "reason": "理由"}},
+      {{"id": 5, "similarity": "高", "reason": "理由"}},
+      {{"id": 12, "similarity": "中", "reason": "理由"}}
+    ],
+    "confidence": "高/中/低",
+    "reasoning": "最終的な選定の理由"
+  }}
+
+variables:
+  - name: "works_list"
+    description: "全作品のIDとタイトルのリスト"
+  - name: "query_text"
+    description: "問題の混ぜ合わせたあらすじ"
+
+api_params:
+  response_format:
+    type: "json_object"
+  temperature: 0.7
+  max_tokens: 1024
