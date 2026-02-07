@@ -9,10 +9,12 @@ Note: This __init__.py re-exports everything from the config.py module
 which is located in the parent directory.
 """
 
-# Import all classes and functions from config.py (sibling module)
-# Since config.py and config/ are siblings, we need to import it directly
+# isort: off
+import importlib.util
 import sys
 from pathlib import Path
+
+# isort: on
 
 # Find the config.py file (sibling to this directory)
 # __init__.py is at signate_studentcup_2025/config/__init__.py
@@ -23,7 +25,6 @@ if not _config_py_path.exists():
     raise ImportError(f"config.py not found at {_config_py_path}")
 
 # Load the module manually since it has the same base name
-import importlib.util
 spec = importlib.util.spec_from_file_location("_config_module", _config_py_path)
 _config_module = importlib.util.module_from_spec(spec)
 sys.modules["_config_module"] = _config_module
@@ -40,6 +41,7 @@ ArtifactsConfig = _config_module.ArtifactsConfig
 WeaveConfig = _config_module.WeaveConfig
 DashboardConfig = _config_module.DashboardConfig
 SweepsConfig = _config_module.SweepsConfig
+RerankingConfig = _config_module.RerankingConfig
 
 # Re-export functions
 log_dataset_as_artifact = _config_module.log_dataset_as_artifact
@@ -58,12 +60,15 @@ FIGURES_DIR = _config_module.FIGURES_DIR
 CONFIG_DIR = _config_module.CONFIG_DIR
 
 # Import prompt-related configs
+# isort: off
 from signate_studentcup_2025.config.prompts import (
     PromptConfig,
     format_prompt,
     list_prompts,
     load_prompt,
 )
+
+# isort: on
 
 __all__ = [
     # Config classes
@@ -77,6 +82,7 @@ __all__ = [
     "WeaveConfig",
     "DashboardConfig",
     "SweepsConfig",
+    "RerankingConfig",
     # Config functions
     "log_dataset_as_artifact",
     "load_yaml_config",

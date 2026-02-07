@@ -1,12 +1,13 @@
 from pathlib import Path
-from typing import Any
 
-import polars as pl
 from loguru import logger
-from tqdm import tqdm
+import polars as pl
 import typer
 
-from signate_studentcup_2025.config import PROCESSED_DATA_DIR, RAW_DATA_DIR, OutputConfig, DataConfig
+from signate_studentcup_2025.config import (
+    DataConfig,
+    OutputConfig,
+)
 
 app = typer.Typer()
 
@@ -53,20 +54,27 @@ def load_fiction_data(path: Path | None = None) -> pl.DataFrame:
     return df
 
 
-def prepare_corpus(base_df: pl.DataFrame) -> list[str]:
+def prepare_corpus(base_df: pl.DataFrame, include_category: bool = True) -> list[str]:
     """
-    コーパステキストを生成（タイトル + あらすじ）
+    Generate corpus text from base stories.
 
     Args:
-        base_df: ベース作品DataFrame
+        base_df: Base stories DataFrame with columns [id, category, title, story]
+        include_category: If True, include category field in corpus text
 
     Returns:
-        コーパステキストのリスト
+        List of corpus text strings
     """
-    corpus = [
-        f"タイトル: {row['title']}\nあらすじ: {row['story']}"
-        for row in base_df.iter_rows(named=True)
-    ]
+    if include_category:
+        corpus = [
+            f"カテゴリ: {row['category']}\nタイトル: {row['title']}\nあらすじ: {row['story']}"
+            for row in base_df.iter_rows(named=True)
+        ]
+    else:
+        corpus = [
+            f"タイトル: {row['title']}\nあらすじ: {row['story']}"
+            for row in base_df.iter_rows(named=True)
+        ]
 
     logger.info(f"コーパスサイズ: {len(corpus)}件")
     return corpus

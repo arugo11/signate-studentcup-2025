@@ -7,15 +7,15 @@ distributions, and understanding model behavior.
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-import polars as pl
 from loguru import logger
 import matplotlib
-matplotlib.use('Agg')  # Non-interactive backend
+import numpy as np
+import polars as pl
+
+matplotlib.use("Agg")  # Non-interactive backend
 import matplotlib.pyplot as plt
-from scipy import stats
-from sklearn.metrics import silhouette_score
 from sklearn.manifold import TSNE
+from sklearn.metrics import silhouette_score
 import umap
 
 
@@ -44,9 +44,7 @@ class ErrorAnalyzer:
         self.base_df = base_df
 
         # Compute correctness
-        self.correctness = [
-            set(p) == set(g) for p, g in zip(predictions, ground_truth)
-        ]
+        self.correctness = [set(p) == set(g) for p, g in zip(predictions, ground_truth)]
 
         self.num_correct = sum(self.correctness)
         self.num_errors = len(self.correctness) - self.num_correct
@@ -60,11 +58,9 @@ class ErrorAnalyzer:
                                    true_a, true_b, correct, partial_match
         """
         data = []
-        for i, (pred, true, query_row) in enumerate(zip(
-            self.predictions,
-            self.ground_truth,
-            self.queries_df.iter_rows(named=True)
-        )):
+        for i, (pred, true, query_row) in enumerate(
+            zip(self.predictions, self.ground_truth, self.queries_df.iter_rows(named=True))
+        ):
             pred_set = set(pred)
             true_set = set(true)
 
@@ -72,16 +68,18 @@ class ErrorAnalyzer:
             intersection = pred_set & true_set
             partial_match = len(intersection) == 1
 
-            data.append({
-                "query_id": i,  # インデックスをIDとして使用
-                "story": query_row["story"],
-                "predicted_a": pred[0],
-                "predicted_b": pred[1],
-                "true_a": true[0],
-                "true_b": true[1],
-                "correct": self.correctness[i],
-                "partial_match": partial_match,
-            })
+            data.append(
+                {
+                    "query_id": i,  # インデックスをIDとして使用
+                    "story": query_row["story"],
+                    "predicted_a": pred[0],
+                    "predicted_b": pred[1],
+                    "true_a": true[0],
+                    "true_b": true[1],
+                    "correct": self.correctness[i],
+                    "partial_match": partial_match,
+                }
+            )
 
         return pl.DataFrame(data)
 
@@ -122,7 +120,9 @@ class ErrorAnalyzer:
 
         if all_predicted_ids:
             # Convert to Polars Series for value_counts
-            pred_counts = pl.Series(all_predicted_ids).value_counts().sort("count", descending=True)
+            pred_counts = (
+                pl.Series(all_predicted_ids).value_counts().sort("count", descending=True)
+            )
             true_counts = pl.Series(all_true_ids).value_counts().sort("count", descending=True)
 
             patterns["most_common_predicted_ids"] = pred_counts.head(10).to_dicts()
@@ -139,6 +139,7 @@ class ErrorAnalyzer:
             artifact_name: Name for the artifact
         """
         import tempfile
+
         import wandb as wandb_module
 
         # Create error DataFrame
@@ -149,32 +150,32 @@ class ErrorAnalyzer:
 
         # Create artifact
         artifact = wandb_module.Artifact(
-            name=artifact_name,
-            type="error_analysis",
-            metadata=patterns
+            name=artifact_name, type="error_analysis", metadata=patterns
         )
 
         # Save detailed error CSV
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
             error_df.write_csv(f.name)
             artifact.add_file(f.name, name="detailed_errors.csv")
             temp_path = f.name
 
         # Save misclassified only
         misclassified_df = self.get_misclassified_samples()
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
             misclassified_df.write_csv(f.name)
             artifact.add_file(f.name, name="misclassified_samples.csv")
             temp_path2 = f.name
 
         # Log patterns as metrics
         if wandb_run:
-            wandb_run.log({
-                "error_analysis/total_errors": patterns["total_errors"],
-                "error_analysis/error_rate": patterns["error_rate"],
-                "error_analysis/partial_matches": patterns["partial_matches"],
-                "error_analysis/complete_misses": patterns["complete_misses"],
-            })
+            wandb_run.log(
+                {
+                    "error_analysis/total_errors": patterns["total_errors"],
+                    "error_analysis/error_rate": patterns["error_rate"],
+                    "error_analysis/partial_matches": patterns["partial_matches"],
+                    "error_analysis/complete_misses": patterns["complete_misses"],
+                }
+            )
 
         wandb_run.log_artifact(artifact)
         logger.info(f"Logged error analysis artifact: {artifact.name}")
@@ -215,6 +216,7 @@ class PredictionAnalyzer:
 
         # Calculate entropy (diversity measure)
         from collections import Counter
+
         pred_counts = Counter(sorted_predictions)
         probs = [count / total_count for count in pred_counts.values()]
         entropy = -sum(p * np.log(p) for p in probs if p > 0)
@@ -238,23 +240,26 @@ class PredictionAnalyzer:
         Args:
             wandb_run: Wandb Run object
         """
+
         import wandb as wandb_module
-        import io
 
         # Analyze distribution
         stats = self.analyze_prediction_distribution()
 
         # Log stats as metrics
-        wandb_run.log({
-            "distribution/unique_predictions": stats["unique_predictions"],
-            "distribution/unique_ratio": stats["unique_ratio"],
-            "distribution/entropy": stats["entropy"],
-            "distribution/normalized_entropy": stats["normalized_entropy"],
-        })
+        wandb_run.log(
+            {
+                "distribution/unique_predictions": stats["unique_predictions"],
+                "distribution/unique_ratio": stats["unique_ratio"],
+                "distribution/entropy": stats["entropy"],
+                "distribution/normalized_entropy": stats["normalized_entropy"],
+            }
+        )
 
         # Create histogram
         sorted_predictions = [tuple(sorted(p)) for p in self.predictions]
         from collections import Counter
+
         pred_counts = Counter(sorted_predictions)
 
         # Get top 20 most common predictions
@@ -268,25 +273,25 @@ class PredictionAnalyzer:
 
             ax.bar(range(len(labels)), counts)
             ax.set_xticks(range(len(labels)))
-            ax.set_xticklabels(labels, rotation=45, ha='right')
-            ax.set_xlabel('Predicted Pair (sorted IDs)')
-            ax.set_ylabel('Frequency')
-            ax.set_title('Top 20 Most Common Predictions')
+            ax.set_xticklabels(labels, rotation=45, ha="right")
+            ax.set_xlabel("Predicted Pair (sorted IDs)")
+            ax.set_ylabel("Frequency")
+            ax.set_title("Top 20 Most Common Predictions")
             plt.tight_layout()
 
             # Save to Wandb
             import tempfile
-            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-                plt.savefig(tmp, format='png', dpi=100)
+
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                plt.savefig(tmp, format="png", dpi=100)
                 tmp_path = tmp.name
 
-            wandb_run.log({
-                "distribution/top_predictions_histogram": wandb_module.Image(tmp_path)
-            })
+            wandb_run.log({"distribution/top_predictions_histogram": wandb_module.Image(tmp_path)})
             plt.close(fig)
 
             # 一時ファイルを削除
             import os
+
             os.unlink(tmp_path)
 
             logger.info("Logged distribution plots to Wandb")
@@ -311,11 +316,7 @@ class EmbeddingVisualizer:
         self.labels = labels or [f"Sample_{i}" for i in range(len(embeddings))]
 
     def create_2d_projection(
-        self,
-        method: str = "umap",
-        n_components: int = 2,
-        random_state: int = 42,
-        **kwargs
+        self, method: str = "umap", n_components: int = 2, random_state: int = 42, **kwargs
     ) -> np.ndarray:
         """
         Create 2D projection of embeddings.
@@ -351,7 +352,7 @@ class EmbeddingVisualizer:
                 n_components=n_components,
                 perplexity=perplexity,
                 random_state=random_state,
-                method='barnes_hut' if len(self.embeddings) > 1000 else 'exact',
+                method="barnes_hut" if len(self.embeddings) > 1000 else "exact",
             )
             projection = reducer.fit_transform(self.embeddings)
 
@@ -384,8 +385,9 @@ class EmbeddingVisualizer:
             wandb_run: Wandb Run object
             title: Plot title
         """
-        import wandb as wandb_module
         import io
+
+        import wandb as wandb_module
 
         fig, ax = plt.subplots(figsize=(10, 10))
 
@@ -395,25 +397,23 @@ class EmbeddingVisualizer:
             alpha=0.6,
             s=50,
             c=range(len(projection)),
-            cmap='viridis',
+            cmap="viridis",
         )
 
-        ax.set_xlabel('Component 1')
-        ax.set_ylabel('Component 2')
+        ax.set_xlabel("Component 1")
+        ax.set_ylabel("Component 2")
         ax.set_title(title)
 
         # Add colorbar
-        plt.colorbar(scatter, ax=ax, label='Sample Index')
+        plt.colorbar(scatter, ax=ax, label="Sample Index")
 
         plt.tight_layout()
 
         # Save to Wandb
         buf = io.BytesIO()
-        plt.savefig(buf, format='png', dpi=150)
+        plt.savefig(buf, format="png", dpi=150)
         buf.seek(0)
-        wandb_run.log({
-            "embeddings/scatter_plot": wandb_module.Image(buf)
-        })
+        wandb_run.log({"embeddings/scatter_plot": wandb_module.Image(buf)})
         plt.close(fig)
 
         logger.info("Logged embedding scatter plot to Wandb")
@@ -448,9 +448,11 @@ class EmbeddingVisualizer:
             silhouette = 0.0
 
         # Log metrics
-        wandb_run.log({
-            "embeddings/n_clusters": n_clusters,
-            "embeddings/silhouette_score": silhouette,
-        })
+        wandb_run.log(
+            {
+                "embeddings/n_clusters": n_clusters,
+                "embeddings/silhouette_score": silhouette,
+            }
+        )
 
         logger.info(f"Cluster analysis: {n_clusters} clusters, silhouette={silhouette:.3f}")

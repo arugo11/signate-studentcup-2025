@@ -1,37 +1,40 @@
 from pathlib import Path
 
+from loguru import logger
 import numpy as np
 import polars as pl
-from loguru import logger
 from tqdm import tqdm
 import typer
 import wandb
 
 from signate_studentcup_2025.config import (
+    ArtifactsConfig,
+    DashboardConfig,
     DataConfig,
     EvaluationConfig,
     OpenRouterConfig,
-    OutputConfig,
+    RerankingConfig,
     RetrievalConfig,
     WandbConfig,
-    ArtifactsConfig,
-    DashboardConfig,
 )
 from signate_studentcup_2025.dataset import load_base_stories, load_fiction_data, prepare_corpus
-from signate_studentcup_2025.modeling.predict import (
-    OpenRouterDirectPredictor,
-    OpenRouterRetrievalPredictor,
-)
 from signate_studentcup_2025.modeling.analysis import (
+    EmbeddingVisualizer,
     ErrorAnalyzer,
     PredictionAnalyzer,
-    EmbeddingVisualizer,
+)
+from signate_studentcup_2025.modeling.predict import (
+    DenseRetrievalPredictor,
+    OpenRouterDirectPredictor,
+    OpenRouterRetrievalPredictor,
+    RerankingPredictor,
 )
 
 app = typer.Typer()
 
 
 # === 評価指標 ===
+
 
 def compute_metrics(
     predictions: list[tuple[int, int]],
@@ -52,9 +55,7 @@ def compute_metrics(
     metrics = {}
 
     # Accuracy（コンペ指標）
-    exact_matches = sum(
-        1 for p, g in zip(predictions, ground_truth) if set(p) == set(g)
-    )
+    exact_matches = sum(1 for p, g in zip(predictions, ground_truth) if set(p) == set(g))
     metrics["accuracy"] = exact_matches / len(predictions)
 
     # Hit Rate@K（少なくとも1件が正解）
@@ -84,9 +85,7 @@ def compute_metrics(
                 (1 if doc_id in true_set else 0) / np.log2(rank + 1)
                 for rank, doc_id in enumerate(pred[:k], start=1)
             )
-            ideal_dcg = sum(
-                1 / np.log2(rank + 1) for rank in range(1, min(len(true_set), k) + 1)
-            )
+            ideal_dcg = sum(1 / np.log2(rank + 1) for rank in range(1, min(len(true_set), k) + 1))
             ndcg_scores.append(dcg / ideal_dcg if ideal_dcg > 0 else 0.0)
         metrics[f"ndcg@{k}"] = np.mean(ndcg_scores)
 
@@ -95,21 +94,41 @@ def compute_metrics(
 
 @app.command()
 def evaluate(
-    approach: str = typer.Option("retrieval", help="retrieval | direct"),
-    model: str = typer.Option(None, help="OpenRouterモデル名（未指定はYAMLのデフォルト）"),
+    approach: str = typer.Option("retrieval", help="retrieval | dense | reranking | direct"),
+    model: str = typer.Option(
+        None, help="Model name (e.g., 'intfloat/multilingual-e5-large' for dense/reranking)"
+    ),
+    reranker_model: str = typer.Option(None, help="Reranker model for 'reranking' approach"),
+    retrieval_k: int = typer.Option(None, help="Top-K candidates for reranking"),
     top_k: int = typer.Option(None, help="Top-K検索のK値（未指定はYAMLのデフォルト）"),
+    device: str = typer.Option("cpu", help="Device for local models (cpu | cuda)"),
 ):
     """
     practiceデータ（20件）で評価
     """
     import tempfile
-    from datetime import datetime
 
     # デフォルト値をYAMLから取得
-    if model is None:
-        model = OpenRouterConfig.DEFAULT_CHAT_MODEL
     if top_k is None:
         top_k = RetrievalConfig.TOP_K
+
+    # Set default model based on approach
+    if model is None:
+        if approach == "dense":
+            model = "intfloat/multilingual-e5-large"
+        elif approach == "reranking":
+            model = "intfloat/multilingual-e5-large"
+        elif approach == "direct":
+            model = OpenRouterConfig.DEFAULT_CHAT_MODEL
+        else:  # retrieval
+            model = OpenRouterConfig.EMBEDDING_MODEL
+
+    # Set reranking-specific defaults
+    if approach == "reranking":
+        if reranker_model is None:
+            reranker_model = RerankingConfig.MODEL
+        if retrieval_k is None:
+            retrieval_k = RerankingConfig.RETRIEVAL_K
 
     # Wandb初期化
     run = None
@@ -122,6 +141,9 @@ def evaluate(
                 "approach": approach,
                 "model": model,
                 "top_k": top_k,
+                "reranker_model": reranker_model if approach == "reranking" else None,
+                "retrieval_k": retrieval_k if approach == "reranking" else None,
+                "device": device,
             },
             mode=WandbConfig.MODE,
         )
@@ -162,6 +184,19 @@ def evaluate(
     # 予測器初期化
     if approach == "retrieval":
         predictor = OpenRouterRetrievalPredictor(top_k=top_k)
+    elif approach == "dense":
+        predictor = DenseRetrievalPredictor(
+            model_name=model,
+            top_k=top_k,
+            device=device,
+        )
+    elif approach == "reranking":
+        predictor = RerankingPredictor(
+            embedding_model=model,
+            reranker_model=reranker_model,
+            retrieval_k=retrieval_k,
+            device=device,
+        )
     elif approach == "direct":
         predictor = OpenRouterDirectPredictor(model=model)
     else:
@@ -169,7 +204,7 @@ def evaluate(
 
     # 学習（インデックス構築）
     logger.info("インデックス構築中...")
-    if approach == "retrieval" and run:
+    if approach in ("retrieval", "dense", "reranking") and run:
         predictor.fit(base_df, wandb_run=run)
     else:
         predictor.fit(base_df)
@@ -211,9 +246,7 @@ def evaluate(
         logger.info("Generating embedding visualizations...")
 
         # ベース作品の埋め込みを取得
-        base_embeddings = predictor.model.encode(
-            prepare_corpus(base_df).to_list()
-        )
+        base_embeddings = predictor.model.encode(prepare_corpus(base_df).to_list())
 
         # クエリ（practiceデータ）の埋め込みを取得
         query_texts = practice_df["story"].to_list()
@@ -221,10 +254,9 @@ def evaluate(
 
         # 結合して可視化
         all_embeddings = np.vstack([base_embeddings, query_embeddings])
-        labels = (
-            [f"Base_{row['id']}" for row in base_df.iter_rows(named=True)] +
-            [f"Query_{i}" for i in range(len(query_embeddings))]
-        )
+        labels = [f"Base_{row['id']}" for row in base_df.iter_rows(named=True)] + [
+            f"Query_{i}" for i in range(len(query_embeddings))
+        ]
 
         # Visualizer初期化
         visualizer = EmbeddingVisualizer(all_embeddings, labels=labels)
@@ -265,13 +297,15 @@ def evaluate(
                 "approach": approach,
                 "model": model,
                 "top_k": top_k,
+                "reranker_model": reranker_model if approach == "reranking" else None,
+                "retrieval_k": retrieval_k if approach == "reranking" else None,
                 "accuracy": metrics["accuracy"],
                 **{k: v for k, v in metrics.items() if k != "accuracy"},
-            }
+            },
         )
 
         # 詳細結果CSVを追加
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
             results_df.write_csv(f.name)
             eval_artifact.add_file(f.name, name="detailed_results.csv")
             temp_path = f.name
@@ -302,7 +336,6 @@ def sweep(
         python signate_studentcup_2025/modeling/evaluate.py sweep \\
             --sweep-config config/sweeps_retrieval.yaml --count 50
     """
-    from signate_studentcup_2025.modeling.sweep_wrapper import launch_sweep
 
     if not WandbConfig.ENABLED:
         logger.error("Wandb is not enabled. Please set WANDB_API_KEY environment variable.")
@@ -318,8 +351,8 @@ def sweep(
         raise typer.Exit(1)
 
     # Import here to avoid issues
-    import yaml
     import wandb as wandb_module
+    import yaml
 
     # Load sweep config
     with open(config_path, encoding="utf-8") as f:

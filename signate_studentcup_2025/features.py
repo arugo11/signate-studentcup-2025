@@ -1,15 +1,13 @@
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
 
 import faiss
-import numpy as np
 from loguru import logger
+import numpy as np
 from tqdm import tqdm
 import typer
 
 from signate_studentcup_2025.config import (
-    PROCESSED_DATA_DIR,
     OpenRouterConfig,
     OutputConfig,
 )
@@ -19,6 +17,7 @@ app = typer.Typer()
 
 
 # === 埋め込みバックエンド ===
+
 
 class EmbeddingBackend(ABC):
     """埋め込みバックエンドの抽象基底クラス"""
@@ -72,50 +71,135 @@ class OpenRouterEmbeddingBackend(EmbeddingBackend):
         return self._dim
 
 
-# TODO: ローカル埋め込みモデルバックエンドの実装
-"""
-TODO: SentenceTransformerBackendクラスを追加して以下のモデルをサポート:
-- intfloat/multilingual-e5-base
-- sonoisa/sentence-distilbert-base-ja
+# Local embedding model backend
 
-実装手順:
-1. `uv add sentence-transformers` でライブラリ追加
-2. SentenceTransformerBackendクラスを実装
-3. EmbeddingModel.__init__() で "sentence-transformer" を選択可能にする
-4. EmbeddingBackendConfigでモデル名を指定可能にする
 
 class SentenceTransformerBackend(EmbeddingBackend):
-    def __init__(self, model_name: str = "intfloat/multilingual-e5-base"):
-        from sentence_transformers import SentenceTransformer
-        self.model = SentenceTransformer(model_name, device="cpu")
-        self._dim = self.model.get_sentence_embedding_dimension()
+    """
+    SentenceTransformer based embedding backend for local models.
 
-    def encode(self, texts: list[str]) -> np.ndarray:
-        return self.model.encode(texts, batch_size=32)
+    Supports models like:
+    - intfloat/multilingual-e5-large (1024 dim)
+    - intfloat/multilingual-e5-base (768 dim)
+    - ruri-large (Japanese specialized)
+    """
+
+    backend_name = "sentence-transformer"
+
+    def __init__(
+        self,
+        model_name: str = "intfloat/multilingual-e5-large",
+        device: str = "cpu",
+        batch_size: int = 32,
+        prefix_query: str = "query:",
+        prefix_passage: str = "passage:",
+    ):
+        """
+        Initialize SentenceTransformer backend.
+
+        Args:
+            model_name: HuggingFace model name
+            device: Device to use ("cpu" or "cuda")
+            batch_size: Batch size for encoding
+            prefix_query: Prefix for query texts (E5 models require "query:" prefix)
+            prefix_passage: Prefix for corpus/passages (E5 models require "passage:" prefix)
+        """
+        from sentence_transformers import SentenceTransformer
+
+        logger.info(f"Loading SentenceTransformer model: {model_name}")
+        self.model = SentenceTransformer(model_name, device=device)
+        self._dim = self.model.get_sentence_embedding_dimension()
+        self.batch_size = batch_size
+        self.prefix_query = prefix_query
+        self.prefix_passage = prefix_passage
+        logger.info(f"Model loaded. Dimension: {self._dim}, Device: {device}")
+
+    @weave_op_decorator_configured("TRACE_EMBEDDINGS")
+    def encode(self, texts: list[str], is_query: bool = False) -> np.ndarray:
+        """
+        Encode texts to embeddings.
+
+        Args:
+            texts: List of text strings
+            is_query: If True, add query prefix (for E5 models)
+
+        Returns:
+            Embedding array of shape (len(texts), dim)
+        """
+        # Add prefix for E5 models if specified
+        prefix = self.prefix_query if is_query else self.prefix_passage
+        if prefix and (self.prefix_query or self.prefix_passage):
+            texts = [f"{prefix} {text}" for text in texts]
+
+        # Encode with progress bar
+        embeddings = self.model.encode(
+            texts,
+            batch_size=self.batch_size,
+            show_progress_bar=True,
+            convert_to_numpy=True,
+            normalize_embeddings=True,  # E5 models require L2 normalization
+        )
+
+        return embeddings.astype(np.float32)
 
     def get_dim(self) -> int:
         return self._dim
-"""
 
 
 class EmbeddingModel:
-    """統一された埋め込みモデルインターフェース"""
+    """Unified embedding model interface."""
 
-    def __init__(self, backend: str = "openrouter"):
+    def __init__(
+        self,
+        backend: str = "openrouter",
+        model_name: str | None = None,
+        device: str = "cpu",
+    ):
+        """
+        Initialize embedding model.
+
+        Args:
+            backend: Backend type ("openrouter" or "sentence-transformer")
+            model_name: Model name (optional, uses config default if not specified)
+            device: Device for local models ("cpu" or "cuda")
+        """
         if backend == "openrouter":
             if not OpenRouterConfig.API_KEY:
                 raise ValueError("OPENROUTER_API_KEYが設定されていません")
             self.backend = OpenRouterEmbeddingBackend(
-                api_key=OpenRouterConfig.API_KEY,
-                model=OpenRouterConfig.EMBEDDING_MODEL
+                api_key=OpenRouterConfig.API_KEY, model=OpenRouterConfig.EMBEDDING_MODEL
             )
         elif backend == "sentence-transformer":
-            # 後で実装
-            raise NotImplementedError("Sentence-Transformerバックエンドは未実装です")
+            # Use provided model_name or default to e5-large
+            if model_name is None:
+                model_name = "intfloat/multilingual-e5-large"
+            self.backend = SentenceTransformerBackend(
+                model_name=model_name,
+                device=device,
+            )
         else:
             raise ValueError(f"未知のバックエンド: {backend}")
 
-    def encode(self, texts: list[str]) -> np.ndarray:
+    def encode(self, texts: list[str], is_query: bool = False) -> np.ndarray:
+        """
+        Encode texts to embeddings.
+
+        Args:
+            texts: List of text strings
+            is_query: If True, use query prefix (for E5 models with sentence-transformer backend)
+
+        Returns:
+            Embedding array
+        """
+        # For backends that don't support is_query parameter, we need to handle it
+        if hasattr(self.backend, "encode"):
+            import inspect
+
+            sig = inspect.signature(self.backend.encode)
+            if "is_query" in sig.parameters:
+                return self.backend.encode(texts, is_query=is_query)
+            else:
+                return self.backend.encode(texts)
         return self.backend.encode(texts)
 
     def get_dim(self) -> int:
@@ -123,6 +207,7 @@ class EmbeddingModel:
 
 
 # === FAISSインデックス構築 ===
+
 
 @weave_op_decorator
 def build_faiss_index(
@@ -143,9 +228,9 @@ def build_faiss_index(
     Returns:
         (FAISSインデックス, 埋め込み配列)
     """
-    # 埋め込み生成
+    # 埋め込み生成 (corpus uses is_query=False for E5 "passage:" prefix)
     logger.info(f"コーパス埋め込み生成: {len(corpus_texts)}件")
-    embeddings = model.encode(corpus_texts)
+    embeddings = model.encode(corpus_texts, is_query=False)
 
     # 正規化（コサイン類似度用）
     faiss.normalize_L2(embeddings)
@@ -167,21 +252,26 @@ def build_faiss_index(
 
     # Wandb Artifactとしてログ
     if wandb_run and save_path:
-        from signate_studentcup_2025.config import ArtifactsConfig
-        import wandb as wandb_module
         from datetime import datetime
         import json
 
+        import wandb as wandb_module
+
+        from signate_studentcup_2025.config import ArtifactsConfig
+
         if ArtifactsConfig.LOG_FAISS_INDEX:
             # バックエンド名を取得（backendはEmbeddingBackendオブジェクト）
-            if hasattr(model, 'backend') and hasattr(model.backend, 'backend_name'):
+            if hasattr(model, "backend") and hasattr(model.backend, "backend_name"):
                 backend_name = model.backend.backend_name
             else:
                 backend_name = "unknown"
 
             # モデル名を取得
-            if hasattr(model, 'backend') and hasattr(model.backend, 'model'):
-                model_name = model.backend.model
+            if hasattr(model, "backend") and hasattr(model.backend, "model_name"):
+                model_name = model.backend.model_name
+            elif hasattr(model, "backend") and hasattr(model.backend, "model"):
+                # For OpenRouter backend where model is a string
+                model_name = str(model.backend.model)
             else:
                 model_name = backend_name
 
@@ -195,7 +285,7 @@ def build_faiss_index(
                     "num_vectors": len(corpus_texts),
                     "index_type": "IndexFlatIP",
                     "created_at": datetime.now().isoformat(),
-                }
+                },
             )
 
             # インデックスファイルを追加
@@ -203,13 +293,16 @@ def build_faiss_index(
 
             # メタデータJSONを追加
             metadata_path = save_path.parent / f"{save_path.stem}_metadata.json"
-            with open(metadata_path, 'w') as f:
-                json.dump({
-                    "corpus_size": len(corpus_texts),
-                    "embedding_dim": model.get_dim(),
-                    "backend": backend_name,
-                    "model": model_name,
-                }, f)
+            with open(metadata_path, "w") as f:
+                json.dump(
+                    {
+                        "corpus_size": len(corpus_texts),
+                        "embedding_dim": model.get_dim(),
+                        "backend": backend_name,
+                        "model": model_name,
+                    },
+                    f,
+                )
             artifact.add_file(str(metadata_path))
 
             wandb_run.log_artifact(artifact)
@@ -240,8 +333,8 @@ def retrieve_top_k(
     Returns:
         [(ドキュメントID, スコア), ...] のリスト
     """
-    # クエリ埋め込み
-    query_emb = model.encode([query_text])
+    # クエリ埋め込み (is_query=True for E5 models)
+    query_emb = model.encode([query_text], is_query=True)
     faiss.normalize_L2(query_emb)
 
     # 検索

@@ -1,16 +1,53 @@
-# ローカル埋め込みモデル（後で実装）
-# TODO: sentence-transformersを追加したときに使用
+# Local embedding models configuration
 
 sentence_transformer:
   models:
+    # E5 models - require "query:" and "passage:" prefixes
+    e5-large:
+      model_name: intfloat/multilingual-e5-large
+      dim: 1024
+      max_length: 512
+      prefix_query: "query:"
+      prefix_passage: "passage:"
+      description: "Multilingual E5 large - 1024 dim, top MMTEB scores"
     e5-base:
       model_name: intfloat/multilingual-e5-base
       dim: 768
       max_length: 512
       prefix_query: "query:"
       prefix_passage: "passage:"
+      description: "Multilingual E5 base - 768 dim, good balance of speed/performance"
+    # Japanese specialized models
     distilbert-ja:
       model_name: sonoisa/sentence-distilbert-base-ja
       dim: 768
       max_length: 512
-  default_model: e5-base
+      prefix_query: ""
+      prefix_passage: ""
+      description: "Japanese DistilBERT - 768 dim"
+    # Ruri models (Japanese specialized, top on JMTEB)
+    ruri-large:
+      model_name: sbintuitions/ruri-large
+      dim: 1024
+      max_length: 512
+      prefix_query: ""
+      prefix_passage: ""
+      description: "Ruri large - Japanese specialized, 1024 dim, top JMTEB performance"
+  default_model: e5-large
+
+# Cross-encoder reranker models
+cross_encoder:
+  ruri:
+    large:
+      model_name: "cl-nagoya/ruri-reranker-large"
+      dim: 1024
+      description: "Ruri large reranker - Japanese specialized, SOTA on JMTEB"
+    small:
+      model_name: "cl-nagoya/ruri-reranker-small"
+      dim: 768
+      description: "Ruri small reranker - Faster variant"
+  mGTE:
+    base:
+      model_name: "Alibaba-NLP/gte-multilingual-reranker-base"
+      dim: 768
+      description: "mGTE multilingual reranker - Good for Japanese + other languages"

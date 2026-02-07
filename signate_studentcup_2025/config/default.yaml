@@ -10,6 +10,7 @@ weave:
   trace_embeddings: true
   trace_retrieval: true
   trace_predictions: true
+  trace_reranking: true
 
 # ダッシュボード設定
 dashboard:
@@ -57,3 +58,11 @@ output:
 sweeps:
   max_trials: 100
   optimization_metric: accuracy
+
+# Reranking設定
+reranking:
+  enabled: true
+  model: "cl-nagoya/ruri-reranker-large"  # or "ruri-small" for speed
+  retrieval_k: 20  # Candidates to retrieve for reranking (sweep: 10, 20, 30, 50)
+  batch_size: 32
+  device: "cpu"  # or "cuda" if available

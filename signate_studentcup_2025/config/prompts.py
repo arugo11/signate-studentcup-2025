@@ -7,8 +7,8 @@
 from pathlib import Path
 from typing import Any
 
-import yaml
 from loguru import logger
+import yaml
 
 
 class PromptConfig:
@@ -52,8 +52,7 @@ class PromptConfig:
         if not prompt_path.exists():
             available = cls.list_available_prompts()
             raise FileNotFoundError(
-                f"Prompt not found: {name}.yaml. "
-                f"Available prompts: {available}"
+                f"Prompt not found: {name}.yaml. Available prompts: {available}"
             )
 
         logger.debug(f"Loading prompt: {prompt_path}")
@@ -64,12 +63,11 @@ class PromptConfig:
         required_keys = ["name", "version", "system_message", "user_template"]
         missing_keys = [key for key in required_keys if key not in config]
         if missing_keys:
-            raise ValueError(
-                f"Invalid prompt config {name}.yaml. "
-                f"Missing keys: {missing_keys}"
-            )
+            raise ValueError(f"Invalid prompt config {name}.yaml. Missing keys: {missing_keys}")
 
-        logger.info(f"Loaded prompt: {config['name']} v{config['version']} - {config.get('description', 'N/A')}")
+        logger.info(
+            f"Loaded prompt: {config['name']} v{config['version']} - {config.get('description', 'N/A')}"
+        )
         return config
 
     @classmethod
@@ -99,8 +97,7 @@ class PromptConfig:
             defined_vars = prompt_config.get("variables", [])
             var_names = [v.get("name") for v in defined_vars]
             raise KeyError(
-                f"Missing template variable: {e}. "
-                f"Expected variables: {var_names}"
+                f"Missing template variable: {e}. Expected variables: {var_names}"
             ) from e
 
         return system_message, formatted_user

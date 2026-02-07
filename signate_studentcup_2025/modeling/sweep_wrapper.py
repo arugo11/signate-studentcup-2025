@@ -4,7 +4,6 @@ This module provides utilities for launching and managing Wandb sweeps.
 """
 
 from pathlib import Path
-from typing import Any
 
 from loguru import logger
 import typer
@@ -13,7 +12,6 @@ import wandb
 from signate_studentcup_2025.config import (
     DataConfig,
     EvaluationConfig,
-    OpenRouterConfig,
     WandbConfig,
 )
 
@@ -59,6 +57,7 @@ def evaluate_sweep_trial(
     approach: str = "retrieval",
     top_k: int = 10,
     model: str = "openai/gpt-4o-mini",
+    device: str = "cpu",
 ):
     """
     Evaluate a single sweep trial.
@@ -66,18 +65,20 @@ def evaluate_sweep_trial(
     This function is called by wandb.agent() for each trial.
 
     Args:
-        approach: Prediction approach ("retrieval" or "direct")
+        approach: Prediction approach ("retrieval", "dense", or "direct")
         top_k: Top-K for retrieval
         model: Model name
+        device: Device for local models (cpu | cuda)
     """
     # Import here to avoid circular dependencies
     from signate_studentcup_2025.dataset import load_base_stories, load_fiction_data
+    from signate_studentcup_2025.modeling.analysis import ErrorAnalyzer, PredictionAnalyzer
+    from signate_studentcup_2025.modeling.evaluate import compute_metrics
     from signate_studentcup_2025.modeling.predict import (
+        DenseRetrievalPredictor,
         OpenRouterDirectPredictor,
         OpenRouterRetrievalPredictor,
     )
-    from signate_studentcup_2025.modeling.evaluate import compute_metrics
-    from signate_studentcup_2025.modeling.analysis import ErrorAnalyzer, PredictionAnalyzer
 
     # Initialize wandb run (handled by agent)
     run = wandb.run
@@ -87,13 +88,18 @@ def evaluate_sweep_trial(
         return
 
     # Log configuration
-    run.config.update({
-        "approach": approach,
-        "top_k": top_k,
-        "model": model,
-    })
+    run.config.update(
+        {
+            "approach": approach,
+            "top_k": top_k,
+            "model": model,
+            "device": device,
+        }
+    )
 
-    logger.info(f"Running sweep trial: approach={approach}, top_k={top_k}, model={model}")
+    logger.info(
+        f"Running sweep trial: approach={approach}, top_k={top_k}, model={model}, device={device}"
+    )
 
     # Load data
     base_df = load_base_stories(DataConfig.BASE_STORIES_PATH)
@@ -102,6 +108,12 @@ def evaluate_sweep_trial(
     # Initialize predictor
     if approach == "retrieval":
         predictor = OpenRouterRetrievalPredictor(top_k=top_k)
+    elif approach == "dense":
+        predictor = DenseRetrievalPredictor(
+            model_name=model,
+            top_k=top_k,
+            device=device,
+        )
     elif approach == "direct":
         predictor = OpenRouterDirectPredictor(model=model)
     else:
@@ -117,6 +129,7 @@ def evaluate_sweep_trial(
     ground_truth = []
 
     from tqdm import tqdm
+
     for row in tqdm(practice_df.iter_rows(named=True), total=len(practice_df)):
         pred_ids = predictor.predict(row["story"])
         true_ids = tuple(sorted([row["id_a"], row["id_b"]]))
@@ -125,11 +138,7 @@ def evaluate_sweep_trial(
         ground_truth.append(true_ids)
 
     # Compute metrics
-    metrics = compute_metrics(
-        predictions,
-        ground_truth,
-        k_values=EvaluationConfig.K_VALUES
-    )
+    metrics = compute_metrics(predictions, ground_truth, k_values=EvaluationConfig.K_VALUES)
 
     # Log primary metric
     run.log({"accuracy": metrics["accuracy"]})
@@ -206,6 +215,7 @@ def evaluate_sweep_trial_command(
     approach: str = typer.Option("retrieval", help="Prediction approach"),
     top_k: int = typer.Option(10, help="Top-K for retrieval"),
     model: str = typer.Option("openai/gpt-4o-mini", help="Model name"),
+    device: str = typer.Option("cpu", help="Device for local models (cpu | cuda)"),
 ):
     """
     Evaluate a single sweep trial (for testing).
@@ -222,7 +232,7 @@ def evaluate_sweep_trial_command(
         raise typer.Exit(1)
 
     # Initialize wandb run
-    run = wandb.init(
+    wandb.init(
         entity=WandbConfig.ENTITY,
         project=WandbConfig.PROJECT,
         job_type="sweep_trial",
@@ -230,12 +240,14 @@ def evaluate_sweep_trial_command(
             "approach": approach,
             "top_k": top_k,
             "model": model,
+            "device": device,
         },
         mode=WandbConfig.MODE,
     )
 
     # Initialize Weave
     from signate_studentcup_2025.weave import init_weave
+
     init_weave(
         entity=WandbConfig.ENTITY,
         project=WandbConfig.PROJECT,
@@ -248,6 +260,7 @@ def evaluate_sweep_trial_command(
             approach=approach,
             top_k=top_k,
             model=model,
+            device=device,
         )
         logger.success("Trial complete")
     except Exception as e:

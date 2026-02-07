@@ -4,8 +4,6 @@ This module provides utilities for initializing Weave tracing in the Wandb ecosy
 """
 
 from loguru import logger
-from typing import Any
-
 
 # Weave initialization state
 _weave_initialized = False
@@ -64,9 +62,7 @@ def init_weave(
             try:
                 import weave
 
-                weave.init(
-                    project_name=f"{entity}/{project}" if entity else project
-                )
+                weave.init(project_name=f"{entity}/{project}" if entity else project)
 
                 _weave_initialized = True
                 logger.info(f"Weave tracing initialized (standalone): {entity}/{project}")
@@ -105,10 +101,12 @@ def get_weave_op():
 
     try:
         import wandb.weave as wandb_weave
+
         return wandb_weave.op
     except ImportError:
         try:
             import weave
+
             return weave.op
         except ImportError:
             logger.warning("Weave.op decorator not available")
@@ -131,15 +129,18 @@ def weave_op_decorator(func=None, **kwargs):
         ... def my_function(x):
         ...     return x * 2
     """
+
     def decorator(f):
         # Try to get weave.op decorator
         try:
             import wandb.weave as wandb_weave
+
             op_decorator = wandb_weave.op
             return op_decorator(**kwargs)(f)
         except ImportError:
             try:
                 import weave
+
                 op_decorator = weave.op
                 return op_decorator(**kwargs)(f)
             except ImportError:
@@ -169,6 +170,7 @@ def weave_op_decorator_configured(config_key: str = None):
         ... def encode(texts):
         ...     return embeddings
     """
+
     def decorator(func):
         # WeaveConfigから設定を取得
         from signate_studentcup_2025.config import WeaveConfig

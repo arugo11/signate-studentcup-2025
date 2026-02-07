@@ -1,28 +1,26 @@
-from pathlib import Path
 from loguru import logger
 from tqdm import tqdm
 import typer
 import wandb
-from datetime import datetime
 
 from signate_studentcup_2025.config import (
+    DashboardConfig,
     DataConfig,
     OutputConfig,
     WandbConfig,
     WeaveConfig,
-    DashboardConfig,
-    ArtifactsConfig,
 )
 from signate_studentcup_2025.dataset import load_base_stories, load_fiction_data, prepare_corpus
-from signate_studentcup_2025.modeling.predict import OpenRouterRetrievalPredictor
-from signate_studentcup_2025.modeling.evaluate import compute_metrics
 from signate_studentcup_2025.modeling.analysis import (
+    EmbeddingVisualizer,
     ErrorAnalyzer,
     PredictionAnalyzer,
-    EmbeddingVisualizer,
 )
+from signate_studentcup_2025.modeling.evaluate import compute_metrics
+from signate_studentcup_2025.modeling.predict import OpenRouterRetrievalPredictor
 
 app = typer.Typer()
+
 
 @app.command()
 def train(
@@ -53,6 +51,7 @@ def train(
         # Weave初期化
         if WeaveConfig.ENABLED:
             from signate_studentcup_2025.weave import init_weave
+
             init_weave(
                 entity=WandbConfig.ENTITY,
                 project=WandbConfig.PROJECT,
@@ -78,11 +77,13 @@ def train(
 
     # メトリクスログ
     if run:
-        run.log({
-            "training/index_size": predictor.index.ntotal,
-            "training/embedding_dim": predictor.model.get_dim(),
-            "training/corpus_size": len(base_df),
-        })
+        run.log(
+            {
+                "training/index_size": predictor.index.ntotal,
+                "training/embedding_dim": predictor.model.get_dim(),
+                "training/corpus_size": len(base_df),
+            }
+        )
 
     # 評価（オプション）
     if eval_on_practice:
@@ -122,9 +123,7 @@ def train(
             logger.info("Generating embedding visualizations...")
 
             # ベース作品の埋め込みを取得
-            base_embeddings = predictor.model.encode(
-                prepare_corpus(base_df).to_list()
-            )
+            base_embeddings = predictor.model.encode(prepare_corpus(base_df).to_list())
 
             # クエリ（practiceデータ）の埋め込みを取得
             query_texts = practice_df["story"].to_list()
@@ -132,11 +131,11 @@ def train(
 
             # 結合して可視化
             import numpy as np
+
             all_embeddings = np.vstack([base_embeddings, query_embeddings])
-            labels = (
-                [f"Base_{row['id']}" for row in base_df.iter_rows(named=True)] +
-                [f"Query_{i}" for i in range(len(query_embeddings))]
-            )
+            labels = [f"Base_{row['id']}" for row in base_df.iter_rows(named=True)] + [
+                f"Query_{i}" for i in range(len(query_embeddings))
+            ]
 
             # Visualizer初期化
             visualizer = EmbeddingVisualizer(all_embeddings, labels=labels)
@@ -162,6 +161,7 @@ def train(
 
     logger.success("Training complete!")
     logger.info(f"Index saved to: {OutputConfig.INTERIM_DIR}/faiss_index_openrouter.pkl")
+
 
 if __name__ == "__main__":
     app()

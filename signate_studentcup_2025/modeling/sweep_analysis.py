@@ -7,8 +7,8 @@ extracting insights, and exporting data.
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
 from loguru import logger
+import pandas as pd
 import typer
 import wandb
 
@@ -34,7 +34,9 @@ def analyze_sweep(
     # Parse sweep path
     parts = sweep_path.split("/")
     if len(parts) != 3:
-        raise ValueError(f"Invalid sweep path: {sweep_path}. Expected format: entity/project/sweep_id")
+        raise ValueError(
+            f"Invalid sweep path: {sweep_path}. Expected format: entity/project/sweep_id"
+        )
 
     sweep_entity = entity or parts[0]
     sweep_project = project or parts[1]
@@ -220,9 +222,11 @@ def compare_sweeps(
     logger.info("\n=== Summary Comparison ===")
     for sweep_id, df in results.items():
         if "accuracy" in df.columns:
-            logger.info(f"{sweep_id}: best={df['accuracy'].max():.3f}, "
-                       f"mean={df['accuracy'].mean():.3f}, "
-                       f"runs={len(df)}")
+            logger.info(
+                f"{sweep_id}: best={df['accuracy'].max():.3f}, "
+                f"mean={df['accuracy'].mean():.3f}, "
+                f"runs={len(df)}"
+            )
 
 
 if __name__ == "__main__":
